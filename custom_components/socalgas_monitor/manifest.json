@@ -1,7 +1,7 @@
 {
   "domain": "socalgas_monitor",
   "name": "SoCalGas Monitor",
-  "version": "0.1.0",
+  "version": "1.1.0",
   "documentation": "https://github.com/chenzhuo1005/socalgas_monitor",
   "requirements": ["playwright>=1.30.0"],
   "codeowners": ["@chenzhuo1005"],
