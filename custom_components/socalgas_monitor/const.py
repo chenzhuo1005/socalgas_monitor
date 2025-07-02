@@ -1,4 +1,4 @@
-DOMAIN = "socalgas_sync"
+DOMAIN = "socalgas_monitor"
 CONF_USERNAME = "username"
 CONF_PASSWORD = "password"
 CONF_INTERVAL = "update_interval"

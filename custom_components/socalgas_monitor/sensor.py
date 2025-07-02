@@ -1,4 +1,4 @@
-# custom_components/socalgas_sync/sensor.py
+# custom_components/socalgas_monitor/sensor.py
 
 import logging
 from datetime import timedelta

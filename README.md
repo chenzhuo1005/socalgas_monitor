@@ -1,4 +1,4 @@
-# SoCalGas Sync Home Assistant Integration
+# SoCalGas Monitor Home Assistant Integration
 
 **Custom Home Assistant integration** to scrape **hourly** gas usage and cost from your SoCalGas account.
 
@@ -68,11 +68,11 @@ playwright install webkit
 
 ## Installation
 
-1. **Clone** or **download** this repository’s `custom_components/socalgas_sync/` folder into your Home Assistant `config/custom_components/` directory.
+1. **Clone** or **download** this repository’s `custom_components/socalgas_monitor/` folder into your Home Assistant `config/custom_components/` directory.
 2. In HACS → **Integrations** → **⋯** (three-dots menu) → **Custom repositories**:
-   - **URL**: `https://github.com/chenzhuo1005/socalgas_sync`
+   - **URL**: `https://github.com/chenzhuo1005/socalgas_monitor`
    - **Category**: Integration  
-3. Install **SoCalGas Sync** and **restart** Home Assistant.
+3. Install **SoCalGas Monitor** and **restart** Home Assistant.
 
 ---
 
@@ -82,7 +82,7 @@ Add the following to your **`configuration.yaml`**:
 
 ```yaml
 sensor:
-  - platform: socalgas_sync
+  - platform: socalgas_monitor
     username: YOUR_SOCALGAS_USERNAME
     password: YOUR_SOCALGAS_PASSWORD
     update_interval: 5   # minutes between fetches; defaults to 5 if omitted

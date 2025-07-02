@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "socalgas-sync"
+name = "socalgas-monitor"
 version = "0.1.0"
 description = ""
 authors = ["Rick Chen <chenzhuo1005@gmail.com>"]
