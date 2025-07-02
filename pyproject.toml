@@ -1,0 +1,15 @@
+[tool.poetry]
+name = "socalgas-sync"
+version = "0.1.0"
+description = ""
+authors = ["Rick Chen <chenzhuo1005@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+playwright = "^1.52.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
