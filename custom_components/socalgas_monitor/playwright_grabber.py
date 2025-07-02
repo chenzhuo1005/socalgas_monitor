@@ -21,7 +21,7 @@ async def fetch_therms(username: str, password: str):
     end   = today.strftime("%m/%d/%Y")
 
     async with async_playwright() as p:
-        browser = await p.webkit.launch(headless=True)
+        browser = await p.chromium.connect_over_cdp("http://127.0.0.1:3000")
         page = await browser.new_page()
 
         # 1. Log in

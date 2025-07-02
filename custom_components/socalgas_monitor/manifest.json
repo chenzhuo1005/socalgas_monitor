@@ -3,8 +3,12 @@
   "name": "SoCalGas Monitor",
   "version": "1.1.0",
   "documentation": "https://github.com/chenzhuo1005/socalgas_monitor",
-  "requirements": ["playwright>=1.30.0"],
-  "codeowners": ["@chenzhuo1005"],
-  "config_flow": false,
+  "requirements": [
+    "playwright>=1.30.0"
+  ],
+  "dependencies": [],
+  "codeowners": [
+    "@chenzhuo1005"
+  ],
   "iot_class": "cloud_polling"
 }
