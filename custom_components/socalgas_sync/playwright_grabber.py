@@ -1,103 +1,112 @@
-# custom_components/socalgas_sync/sensor.py
+from datetime import datetime, timedelta
+import re
+from playwright.async_api import async_playwright
 
-import logging
-from datetime import timedelta
-from homeassistant.components.sensor import SensorEntity
-from homeassistant.const import DEVICE_CLASS_GAS, STATE_CLASS_MEASUREMENT
-from homeassistant.helpers.update_coordinator import (
-    DataUpdateCoordinator,
-    CoordinatorEntity,
-)
-from .playwright_grabber import fetch_therms
-from .const import DOMAIN, CONF_USERNAME, CONF_PASSWORD, CONF_INTERVAL, DEFAULT_INTERVAL
+LOGIN_URL = "https://myaccount.socalgas.com/login"
 
-_LOGGER = logging.getLogger(__name__)
+async def fetch_therms(username: str, password: str):
+    """
+    Login to SoCalGas, navigate to the hourly usage table,
+    scrape the rows and return the most recent non-zero entry:
+      - date (str): 'MM/DD/YYYY'
+      - time (str): 'HH:MM AM/PM'
+      - usage (float): Usage (Therms)
+      - cost (float): Cost ($)
+      - avg_temp (float): Avg. Temp (F)
+      - timestamp (datetime)
+    """
 
-async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
-    """Set up two SoCalGas sensors: usage and cost."""
-    conf = hass.data.get(DOMAIN)
-    if not conf:
-        _LOGGER.error("No configuration for %s found", DOMAIN)
-        return
+    # Prepare date range strings
+    today = datetime.now()
+    end   = today.strftime("%m/%d/%Y")
 
-    username = conf[CONF_USERNAME]
-    password = conf[CONF_PASSWORD]
-    interval = conf.get(CONF_INTERVAL, DEFAULT_INTERVAL)
+    async with async_playwright() as p:
+        browser = await p.webkit.launch(headless=True)
+        page = await browser.new_page()
 
-    # Create a coordinator that calls fetch_therms() every `interval` minutes
-    coordinator = DataUpdateCoordinator(
-        hass,
-        _LOGGER,
-        name="SoCalGas",
-        update_method=lambda: fetch_therms(username, password),
-        update_interval=timedelta(minutes=interval),
-    )
+        # 1. Log in
+        await page.goto(LOGIN_URL)
+        await page.fill("input[name='email']", username)
+        await page.fill("input[name='password']", password)
+        await page.click("button.primary.large[aria-label='Log In']")
+        await page.wait_for_load_state("networkidle")
 
-    # Do the first refresh now
-    await coordinator.async_config_entry_first_refresh()
+        # 2. Navigate to the usage page
+        await page.wait_for_selector("button[aria-label='Analyze Usage']", state="visible", timeout=30000)
+        await page.click("button[aria-label='Analyze Usage']")
+        await page.wait_for_load_state("networkidle")
 
-    # Create and register two sensors
-    async_add_entities([
-        SoCalGasUsageSensor(coordinator),
-        SoCalGasCostSensor(coordinator),
-    ], update_before_add=False)
+        # 3. Switch to Table + Hourly view inside the iframe
+        await page.wait_for_selector("iframe[data-testid='sew-iframe']", timeout=30000)
+        gb_frame = page.frame_locator("iframe[data-testid='sew-iframe']")
 
+        # Click the "Table" view button
+        await gb_frame.locator("a#table[title='Click to view  usage in Table']").wait_for(state="visible", timeout=30000)
+        await gb_frame.locator("a#table").click()
 
-class SoCalGasUsageSensor(CoordinatorEntity, SensorEntity):
-    """SensorEntity for hourly usage in therms."""
+        # Click the "Hourly" view button
+        await gb_frame.locator("a#hourly[title='Click to view Hourly Usage data']").wait_for(state="visible", timeout=30000)
+        await gb_frame.locator("a#hourly").click()
 
-    _attr_device_class = DEVICE_CLASS_GAS
-    _attr_state_class = STATE_CLASS_MEASUREMENT
-    _attr_native_unit_of_measurement = "therm"
-    _attr_name = "SoCalGas Usage"
-    _attr_unique_id = "socalgas_usage"
+        # Wait for the hourly table to render
+        await gb_frame.locator("table.MuiTable-root.tblhourly tbody tr").first.wait_for(state="visible", timeout=30000)
 
-    def __init__(self, coordinator: DataUpdateCoordinator):
-        """Initialize with a shared coordinator."""
-        super().__init__(coordinator)
+        # 4. Scrape all rows from the table
+        rows = gb_frame.locator("table.MuiTable-root.tblhourly tbody tr")
+        count = await rows.count()
+        entries = []
+        for i in range(count):
+            row = rows.nth(i)
+            cells = await row.locator("td").all_text_contents()
+            # cells → [ time, cost, usage, avg_temp ]
+            time_str, cost_str, usage_str, avg_temp_str = [c.strip() for c in cells]
+            
+            # Skip rows that aren't hourly times (e.g. date rows like "11/06/2025")
+            if not re.match(r"^\d{1,2}:\d{2} [AP]M$", time_str):
+                continue
 
-    @property
-    def native_value(self) -> float:
-        """Return the latest usage (therms)."""
-        return self.coordinator.data["usage"]
+            # Clean and convert values
+            cost     = float(cost_str.replace("$", ""))
+            usage    = float(usage_str)
+            # Remove all non-digit and non-dot characters from the temperature string
+            temp_num = re.sub(r"[^\d.]", "", avg_temp_str)
+            avg_temp = float(temp_num) if temp_num else 0.0
 
-    @property
-    def extra_state_attributes(self) -> dict:
-        """Return the rest of the data as attributes."""
-        data = self.coordinator.data
-        return {
-            "date":      data["date"],
-            "time":      data["time"],
-            "avg_temp":  data["avg_temp"],
-            "timestamp": data["timestamp"].isoformat(),
+            # Combine date and time into a timestamp
+            timestamp = datetime.strptime(f"{end} {time_str}", "%m/%d/%Y %I:%M %p")
+
+            entries.append({
+                "date":     end,
+                "time":     time_str,
+                "usage":    usage,
+                "cost":     cost,
+                "avg_temp": avg_temp,
+                "timestamp": timestamp
+            })
+
+        await browser.close()
+
+    # 5. Compare against the system clock (always floored to the current hour)
+    now = datetime.now()
+    # Floor the time down to the top of the hour, e.g. 23:58 → 23:00
+    ref_timestamp = now.replace(minute=0, second=0, microsecond=0)
+
+    # Look for an entry whose timestamp exactly matches ref_timestamp
+    # Note: each entry’s timestamp is constructed as today’s date + the hour
+    match = next((e for e in entries if e["timestamp"] == ref_timestamp), None)
+
+    if match:
+        chosen = match
+    else:
+        # If no matching entry is found, return a “blank” record with zero values
+        # but keep the timestamp set to ref_timestamp
+        chosen = {
+            "date":      ref_timestamp.strftime("%m/%d/%Y"),
+            "time":      ref_timestamp.strftime("%I:%M %p"),
+            "usage":     0.0,
+            "cost":      0.0,
+            "avg_temp":  0.0,
+            "timestamp": ref_timestamp
         }
 
-
-class SoCalGasCostSensor(CoordinatorEntity, SensorEntity):
-    """SensorEntity for the cost of that usage."""
-
-    _attr_state_class = STATE_CLASS_MEASUREMENT
-    _attr_native_unit_of_measurement = "$"
-    _attr_name = "SoCalGas Cost"
-    _attr_unique_id = "socalgas_cost"
-
-    def __init__(self, coordinator: DataUpdateCoordinator):
-        """Initialize with a shared coordinator."""
-        super().__init__(coordinator)
-
-    @property
-    def native_value(self) -> float:
-        """Return the cost in dollars."""
-        return round(self.coordinator.data["cost"], 2)
-
-    @property
-    def extra_state_attributes(self) -> dict:
-        """Expose usage and timestamp alongside cost."""
-        data = self.coordinator.data
-        return {
-            "usage":     data["usage"],
-            "date":      data["date"],
-            "time":      data["time"],
-            "avg_temp":  data["avg_temp"],
-            "timestamp": data["timestamp"].isoformat(),
-        }
+    return chosen

@@ -18,6 +18,54 @@
 
 ---
 
+## Prerequisites
+
+Because this integration uses Playwright to drive a headless browser, you must ensure that **playwright** and the **Chromium** browser binary are installed in your HA Python environment.
+
+### If you’re running Home Assistant in Docker
+
+Create a custom Docker image by adding a `Dockerfile` next to your `configuration.yaml`:
+
+```dockerfile
+# Use the official Home Assistant image as base
+ARG HA_IMAGE=ghcr.io/home-assistant/home-assistant:stable
+FROM ${HA_IMAGE}
+
+# Install Playwright Python bindings
+RUN pip install playwright
+
+# Install the Chromium browser binary for Playwright
+RUN playwright install chromium
+```
+
+Then rebuild and launch your container:
+
+```bash
+docker build -t home-assistant-custom .
+docker run -d \
+  --name home-assistant \
+  --restart=unless-stopped \
+  -v /path/to/your/config:/config \
+  home-assistant-custom
+```
+
+### If you’re on Home Assistant OS / Supervised
+
+1. Install the **Terminal & SSH** add-on (or any add-on that gives you a shell).  
+2. Open the shell and run:
+
+   ```bash
+   pip install playwright
+   playwright install chromium
+   ```
+
+To install **WebKit** instead of Chromium, just replace the last command with:
+
+```bash
+playwright install webkit
+```
+
+
 ## Installation
 
 1. **Clone** or **download** this repository’s `custom_components/socalgas_sync/` folder into your Home Assistant `config/custom_components/` directory.

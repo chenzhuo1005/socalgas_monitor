@@ -4,13 +4,17 @@ import logging
 from datetime import timedelta
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.const import DEVICE_CLASS_GAS, STATE_CLASS_MEASUREMENT
+from homeassistant.helpers.update_coordinator import (
+    DataUpdateCoordinator,
+    CoordinatorEntity,
+)
 from .playwright_grabber import fetch_therms
 from .const import DOMAIN, CONF_USERNAME, CONF_PASSWORD, CONF_INTERVAL, DEFAULT_INTERVAL
 
 _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
-    """Set up the SoCalGas sensor platform."""
+    """Set up two SoCalGas sensors: usage and cost."""
     conf = hass.data.get(DOMAIN)
     if not conf:
         _LOGGER.error("No configuration for %s found", DOMAIN)
@@ -18,63 +22,82 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
 
     username = conf[CONF_USERNAME]
     password = conf[CONF_PASSWORD]
-    update_interval = conf.get(CONF_INTERVAL, DEFAULT_INTERVAL)
+    interval = conf.get(CONF_INTERVAL, DEFAULT_INTERVAL)
 
-    async_add_entities([SoCalGasThermsSensor(username, password, update_interval)], True)
+    # Create a coordinator that calls fetch_therms() every `interval` minutes
+    coordinator = DataUpdateCoordinator(
+        hass,
+        _LOGGER,
+        name="SoCalGas",
+        update_method=lambda: fetch_therms(username, password),
+        update_interval=timedelta(minutes=interval),
+    )
+
+    # Do the first refresh now
+    await coordinator.async_config_entry_first_refresh()
+
+    # Create and register two sensors
+    async_add_entities([
+        SoCalGasUsageSensor(coordinator),
+        SoCalGasCostSensor(coordinator),
+    ], update_before_add=False)
 
 
-class SoCalGasThermsSensor(SensorEntity):
-    """Sensor that reports your latest hourly SoCalGas usage."""
+class SoCalGasUsageSensor(CoordinatorEntity, SensorEntity):
+    """SensorEntity for hourly usage in therms."""
 
-    # These class attributes tell HA how to treat our sensor
     _attr_device_class = DEVICE_CLASS_GAS
     _attr_state_class = STATE_CLASS_MEASUREMENT
     _attr_native_unit_of_measurement = "therm"
+    _attr_name = "SoCalGas Usage"
+    _attr_unique_id = "socalgas_usage"
 
-    def __init__(self, username: str, password: str, interval: int):
-        """Initialize the sensor with credentials and scan interval."""
-        self._username = username
-        self._password = password
-        self._attr_name = "SoCalGas Therms"
-        self._attr_unique_id = f"socalgas_therms_{username}"
-        # Tell HA to call async_update() every `interval` minutes
-        self._attr_scan_interval = timedelta(minutes=interval)
-        # Will hold the numeric therms value
-        self._attr_native_value = None
-        # Will hold date, time, cost, avg_temp and timestamp
-        self._attr_extra_state_attributes = {}
+    def __init__(self, coordinator: DataUpdateCoordinator):
+        """Initialize with a shared coordinator."""
+        super().__init__(coordinator)
 
-    async def async_update(self):
-        """
-        Fetch new data from SoCalGas and update state + attributes.
+    @property
+    def native_value(self) -> float:
+        """Return the latest usage (therms)."""
+        return self.coordinator.data["usage"]
 
-        fetch_therms returns a dict:
-          - date (str): 'MM/DD/YYYY'
-          - time (str): 'HH:MM AM/PM'
-          - usage (float): Usage in therms
-          - cost (float): Cost in $
-          - avg_temp (float): Average temperature in °F
-          - timestamp (datetime): full timestamp
-        """
-        try:
-            data = await fetch_therms(self._username, self._password)
-        except Exception as exc:
-            _LOGGER.error("Error fetching SoCalGas data: %s", exc)
-            return
-
-        # Primary sensor state: hourly usage in therms
-        self._attr_native_value = data["usage"]
-
-        # Expose the rest as extra attributes
-        self._attr_extra_state_attributes = {
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Return the rest of the data as attributes."""
+        data = self.coordinator.data
+        return {
             "date":      data["date"],
             "time":      data["time"],
-            "cost":      round(data["cost"], 2),
-            "avg_temp":  round(data["avg_temp"], 1),
+            "avg_temp":  data["avg_temp"],
             "timestamp": data["timestamp"].isoformat(),
         }
 
-        _LOGGER.debug(
-            "SoCalGas sensor updated: %s therms at %s",
-            data["usage"], data["timestamp"]
-        )
+
+class SoCalGasCostSensor(CoordinatorEntity, SensorEntity):
+    """SensorEntity for the cost of that usage."""
+
+    _attr_state_class = STATE_CLASS_MEASUREMENT
+    _attr_native_unit_of_measurement = "$"
+    _attr_name = "SoCalGas Cost"
+    _attr_unique_id = "socalgas_cost"
+
+    def __init__(self, coordinator: DataUpdateCoordinator):
+        """Initialize with a shared coordinator."""
+        super().__init__(coordinator)
+
+    @property
+    def native_value(self) -> float:
+        """Return the cost in dollars."""
+        return round(self.coordinator.data["cost"], 2)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Expose usage and timestamp alongside cost."""
+        data = self.coordinator.data
+        return {
+            "usage":     data["usage"],
+            "date":      data["date"],
+            "time":      data["time"],
+            "avg_temp":  data["avg_temp"],
+            "timestamp": data["timestamp"].isoformat(),
+        }
