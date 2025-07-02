@@ -3,9 +3,6 @@
   "name": "SoCalGas Monitor",
   "version": "1.1.0",
   "documentation": "https://github.com/chenzhuo1005/socalgas_monitor",
-  "requirements": [
-    "playwright>=1.30.0"
-  ],
   "dependencies": [],
   "codeowners": [
     "@chenzhuo1005"
